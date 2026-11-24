@@ -1,0 +1,48 @@
+name: Build offline Moon atlas
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tools/build.py'
+      - '.github/workflows/build-atlas.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: luna-offline-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install image processing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdal-bin
+          python -m pip install numpy
+      - name: Download NASA maps and generate offline file
+        run: python tools/build.py
+      - name: Validate generated script
+        run: |
+          python -c "from pathlib import Path; s=Path('src/viewer.html').read_text(); Path('.cache/viewer.js').write_text(s.split('<script>', 1)[1].split('</script>', 1)[0])"
+          node --check .cache/viewer.js
+      - name: Publish generated assets to main
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html assets/lroc-16k.jpg assets/lola-8k.delta16.gz
+          if ! git diff --cached --quiet; then
+            git commit -m 'Build standalone high-resolution Luna atlas'
+            git push origin HEAD:main
+          fi
